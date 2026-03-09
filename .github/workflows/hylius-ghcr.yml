@@ -1,0 +1,41 @@
+name: Hylius Build & Deploy via GHCR
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Start BuildKit
+        run: |
+          docker run -d --name buildkitd --privileged moby/buildkit:latest
+          echo "BUILDKIT_HOST=docker-container://buildkitd" >> $GITHUB_ENV
+      - name: Install Railpack
+        run: curl -sSL https://railpack.com/install.sh | bash
+      - name: Build and push image with Railpack
+        run: |
+          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          railpack build . --name ghcr.io/$REPO_LOWER:${{ github.sha }}
+          docker push ghcr.io/$REPO_LOWER:${{ github.sha }}
+      - name: Notify Hylius
+        run: |
+          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          curl -X POST "$HYLIUS_WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $HYLIUS_TOKEN" \
+            -d "{\"image\":\"ghcr.io/$REPO_LOWER:${{ github.sha }}\",\"sha\":\"${{ github.sha }}\",\"repo\":\"${{ github.repository }}\",\"ref\":\"${{ github.ref }}\"}"
+        env:
+          HYLIUS_WEBHOOK: ${{ secrets.HYLIUS_WEBHOOK_URL }}
+          HYLIUS_TOKEN: ${{ secrets.HYLIUS_API_TOKEN }}
