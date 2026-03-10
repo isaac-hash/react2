@@ -1,0 +1,43 @@
+name: Hylius Docker Compose CI
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push Compose services
+        run: |
+          export REGISTRY_IMAGE=$(echo "ghcr.io/${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          export TAG=${{ github.sha }}
+          
+          # Check for docker-compose.yml or compose.yaml
+          COMPOSE_FILE="docker-compose.yml"
+          if [ -f "compose.yaml" ]; then
+            COMPOSE_FILE="compose.yaml"
+          fi
+          
+          docker compose -f $COMPOSE_FILE build
+          docker compose -f $COMPOSE_FILE push
+      - name: Notify Hylius
+        run: |
+          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          curl -X POST "$HYLIUS_WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $HYLIUS_TOKEN" \
+            -d "{\"sha\":\"${{ github.sha }}\",\"repo\":\"${{ github.repository }}\",\"ref\":\"${{ github.ref }}\",\"compose\":true}"
+        env:
+          HYLIUS_WEBHOOK: ${{ secrets.HYLIUS_WEBHOOK_URL }}
+          HYLIUS_TOKEN: ${{ secrets.HYLIUS_API_TOKEN }}
